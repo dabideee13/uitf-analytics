@@ -68,8 +68,11 @@ class UitfFundSpider(scrapy.Spider):
                 selectors = driver_response.xpath('//table[@id="generated-report"]/tbody//tr')
 
                 for selector in selectors:
-                    bank = selector.xpath('./td[1]/text()').get()
                     fund_name = selector.xpath('./td[2]/text()').get()
+                    if not fund_name:
+                        continue
+
+                    bank = selector.xpath('./td[1]/text()').get()
                     classification = selector.xpath('./td[3]/text()').get()
                     inception_date = selector.xpath('./td[4]/text()').get()
                     risk_classification = selector.xpath('./td[5]/text()').get()
