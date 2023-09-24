@@ -4,6 +4,7 @@ import scrapy
 from scrapy.http import Request
 
 from ..items import UitfPerformanceItem
+from ..utils import clean_string
 
 
 class UitfPerformanceYtdSpider(scrapy.Spider):
@@ -29,13 +30,12 @@ class UitfPerformanceYtdSpider(scrapy.Spider):
         selectors = response.xpath('//table[@id="generated-report"]/tbody//tr')
 
         for selector in selectors:
-            fund_name = selector.xpath('./td[3]/a/text()').get()
             bank = selector.xpath('./td[2]/a/text()').get()
+            fund_name = selector.xpath('./td[3]/a/text()').get()
             ytd = selector.xpath('./td[4]/text()').get()
             self.logger.info(f"Extracting details for {fund_name}")
 
-            item['bank'] = self.clean_string(bank)
-            item['fund_name'] = self.clean_string(fund_name)
-            item['ytd'] = self.clean_string(ytd)
-
+            item['bank'] = clean_string(bank)
+            item['fund_name'] = clean_string(fund_name)
+            item['ytd'] = clean_string(ytd)
             yield item
