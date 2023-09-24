@@ -6,7 +6,7 @@ from scrapy.http import Request
 from ..items import UitfPerformanceItem
 
 
-class UitfPhpPerformanceSpider(scrapy.Spider):
+class UitfPerformanceYtdSpider(scrapy.Spider):
     name = 'uitf_performance_ytd'
     max_class_id = 46
     currencies = ['PHP', 'USD']
