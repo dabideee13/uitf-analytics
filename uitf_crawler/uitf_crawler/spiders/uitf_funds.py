@@ -1,6 +1,8 @@
 from typing import Iterable, Any
 
 import scrapy
+from scrapy.spiders import CrawlSpider, Rule
+from scrapy.linkextractors import LinkExtractor
 from scrapy.http import Request
 from scrapy.selector import Selector
 from selenium import webdriver
@@ -9,15 +11,16 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-from ..items import UitfFundItem
-from ..utils import wait_element, clean_string
+from ..utils import wait_element, clean_string, clean_fund_name, clean_fund_details_key
 
 
-class UitfFundSpider(scrapy.Spider):
+class UitfFundSpider(CrawlSpider):
     name = 'uitf_fund'
     urls = ['https://www.uitf.com.ph/fund-matrix.php']
     class_values = ['1', '21', '42', '22', '41', '50', '5', '7', '6', '23', '45', '40', '44', '4', '2']
-    currencies = ['PHP', 'USD', 'JPY']
+    currencies = ['PHP', 'USD']
+    link_extractor = LinkExtractor(restrict_xpaths='//a[starts-with(@href, "daily_navpu_details.php")]')
+    rules = (Rule(link_extractor, callback='parse_fund_details', follow=True),)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -40,25 +43,29 @@ class UitfFundSpider(scrapy.Spider):
     def start_requests(self) -> Iterable[Request]:
         for url in self.urls:
             self.logger.info(f"Getting requests for {url}")
-            yield scrapy.Request(url=url, callback=self.parse)
+            yield scrapy.Request(url=url, callback=self.parse_fund_list)
 
-    def parse(self, response):
-        item = UitfFundItem()
+    def parse_fund_list(self, response):
+        self.logger.info(f'Starting selenium driver')
         self.driver.get(response.url)
         self.wait.until(lambda driver: driver.find_element(By.ID, 'class-id').is_displayed())
 
+        self.logger.info(f'Selecting from dropdown menu')
         class_dropdown = self.driver.find_element(By.ID, 'class-id')
         select_class = Select(class_dropdown)
 
         for class_value in self.class_values:
+            self.logger.info(f'Selecting from dropdown menu for class {class_value}')
             select_class.select_by_value(class_value)
             wait_element()
 
             for currency_value in self.currencies:
+                self.logger.info(f'Selecting from dropdown menu for currency {currency_value}')
                 select_currency = Select(self.driver.find_element(By.ID, 'currency'))
                 select_currency.select_by_value(currency_value)
                 wait_element()
 
+                self.logger.info(f'Clicking on filter button')
                 filter_button = self.driver.find_element(By.ID, 'filter-funds-button')
                 filter_button.click()
                 wait_element()
@@ -68,40 +75,41 @@ class UitfFundSpider(scrapy.Spider):
                 selectors = driver_response.xpath('//table[@id="generated-report"]/tbody//tr')
 
                 for selector in selectors:
-                    fund_name = selector.xpath('./td[2]/text()').get()
-                    if not fund_name:
-                        continue
+                    bank = selector.xpath('./td[@class="sorting_1"]/text()').get()
+                    fund_details_url = response.urljoin(selector.xpath('./td/a/@href').get())
 
-                    bank = selector.xpath('./td[1]/text()').get()
-                    classification = selector.xpath('./td[3]/text()').get()
-                    inception_date = selector.xpath('./td[4]/text()').get()
-                    risk_classification = selector.xpath('./td[5]/text()').get()
-                    currency = selector.xpath('./td[6]/text()').get()
-                    min_initial_participation = selector.xpath('./td[7]/text()').get()
-                    min_additional_participation = selector.xpath('./td[9]/text()').get()
-                    min_maintaining_balance = selector.xpath('./td[11]/text()').get()
-                    min_holding_period = selector.xpath('./td[13]/text()').get()
-                    settlement_date = selector.xpath('./td[15]/text()').get()
-                    trust_fee_structure = selector.xpath('./td[16]/text()').get()
-                    early_redemption_fee = selector.xpath('./td[17]/text()').get()
-                    navpu = selector.xpath('./td[20]/text()').get()
-                    self.logger.info(f"Extracting details for {fund_name}")
+                    try:
+                        navpu_selector = selector.xpath('.//td')[-2]
+                        navpu = navpu_selector.xpath('./text()').get()
 
-                    item['bank'] = clean_string(bank)
-                    item['fund_name'] = clean_string(fund_name)
-                    item['classification'] = clean_string(classification)
-                    item['inception_date'] = clean_string(inception_date)
-                    item['risk_classification'] = clean_string(risk_classification)
-                    item['currency'] = clean_string(currency)
-                    item['min_initial_participation'] = clean_string(min_initial_participation)
-                    item['min_additional_participation'] = clean_string(min_additional_participation)
-                    item['min_maintaining_balance'] = clean_string(min_maintaining_balance)
-                    item['min_holding_period'] = clean_string(min_holding_period)
-                    item['settlement_date'] = clean_string(settlement_date)
-                    item['trust_fee_structure'] = clean_string(trust_fee_structure)
-                    item['early_redemption_fee'] = clean_string(early_redemption_fee)
-                    item['navpu'] = clean_string(navpu)
-                    yield item
+                        if not navpu:
+                            continue
+
+                        self.logger.info(f'Parsing Bank: {bank} | Fund details url: {fund_details_url}')
+                        yield scrapy.Request(
+                            url=fund_details_url, 
+                            callback=self.parse_fund_details, 
+                            meta={'bank': bank, 'navpu': navpu}
+                        )
+                    
+                    except IndexError:
+                        self.logger.info(f'Skipping {fund_details_url}')
+
+    def parse_fund_details(self, response):
+        fund_name = response.xpath('//section[@class="page-content"]//h2/text()').get()
+        classification = response.xpath('//h6[@id="tpg"]/text()').get()
+        selectors = response.xpath('//table[@class="tbl-50=50"]/tbody//tr')
+
+        fund_details = {
+            clean_fund_details_key(selector.xpath('./td[1]/text()').get()): selector.xpath('./td[2]/text()').get()
+            for selector in selectors
+        }
+        fund_details['fund_name'] = clean_fund_name(fund_name)
+        fund_details['classification'] = clean_string(classification)
+        fund_details['navpu'] = clean_string(response.meta['navpu'])
+        fund_details['bank'] = clean_string(response.meta['bank'])
+        fund_details['url'] = response.url
+        yield fund_details
 
     def closed(self, reason: str) -> None:
         self.driver.quit()

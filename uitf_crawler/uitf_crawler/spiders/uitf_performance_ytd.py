@@ -10,7 +10,7 @@ from ..utils import clean_string
 class UitfPerformanceYtdSpider(scrapy.Spider):
     name = 'uitf_performance_ytd'
     max_class_id = 46
-    currencies = ['PHP', 'USD']
+    currencies = ['PHP', 'USD', 'JPY']
 
     def format_url(self, class_id: int, currency: str) -> str:
         return f"https://uitf.com.ph/top-funds.php?class_id={class_id}&currency={currency}&radio1=ytd&fromdate=&todate=&btn=FILTER"
